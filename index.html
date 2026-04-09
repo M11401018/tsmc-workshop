@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TSMC IM Workshop 2026 排班檢查系統</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .cell-input { @apply w-10 h-8 text-center border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none uppercase; }
+        .sticky-col { position: sticky; left: 0; background-color: white; z-index: 20; }
+        .sticky-header { position: sticky; top: 0; z-index: 30; }
+        /* 隱藏外觀但保留焦點用於貼上 */
+        #paste-handler { position: absolute; left: -9999px; top: 0; }
+        .stat-row { @apply text-[10px] font-bold text-center bg-gray-50; }
+        .count-d { @apply text-orange-600; }
+        .count-e { @apply text-green-600; }
+        .count-n { @apply text-purple-600; }
+        .count-o { @apply text-gray-400; }
+    </style>
+</head>
+<body class="bg-gray-50 p-4 md:p-8" @paste="handleGlobalPaste">
+    <div id="app" class="max-w-7xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">TSMC IM Workshop 2026 排班檢查系統</h1>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-1">
+                <div class="bg-white p-6 rounded-xl shadow-md border-l-8 border-blue-600 mb-6">
+                    <p class="text-gray-500 text-sm font-semibold uppercase tracking-wider">Total Penalty</p>
+                    <h2 class="text-5xl font-black text-blue-700">{{ totalScore.toFixed(1) }}</h2>
+                </div>
+
+                <div class="bg-white p-4 rounded-xl shadow-md border border-gray-200">
+                    <h3 class="text-xl font-bold mb-4 border-b pb-2">📋 規則明細</h3>
+                    <table class="w-full text-left">
+                        <tbody class="divide-y text-sm">
+                            <tr v-for="(v, k) in reportData" :key="k">
+                                <td class="py-2 text-gray-700">{{ v.label }}</td>
+                                <td class="py-2 text-center font-mono">{{ v.count }}</td>
+                                <td class="py-2 text-right font-bold text-red-500">{{ v.subtotal.toFixed(1) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 text-sm">
+                <div class="bg-white p-4 rounded-xl shadow-md border border-gray-200">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-bold">✍️ 排班表編輯區</h3>
+                        <div class="flex gap-2">
+                            <span class="text-xs text-gray-400 self-center">支援 Excel 直接貼上 (Ctrl+V)</span>
+                            <button @click="resetSchedule" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-xs text-gray-600">全部清空(O)</button>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto max-h-[700px] border rounded">
+                        <table class="w-full border-collapse">
+                            <thead>
+                                <tr class="bg-gray-100 sticky-header z-40">
+                                    <th class="p-2 border sticky-col z-50 min-w-[100px] bg-gray-100">人員 / 日期</th>
+                                    <th v-for="d in 30" :key="d" class="p-1 border min-w-[42px]" :class="{'bg-yellow-100': isWeekend(d)}">
+                                        {{ d }}
+                                    </th>
+                                </tr>
+                                <tr class="stat-row">
+                                    <td class="border sticky-col bg-gray-50 text-right pr-2">D (早) 人數</td>
+                                    <td v-for="(c, idx) in dailyStats" :key="idx" class="border count-d">{{ c.D }}</td>
+                                </tr>
+                                <tr class="stat-row">
+                                    <td class="border sticky-col bg-gray-50 text-right pr-2">E (午) 人數</td>
+                                    <td v-for="(c, idx) in dailyStats" :key="idx" class="border count-e">{{ c.E }}</td>
+                                </tr>
+                                <tr class="stat-row">
+                                    <td class="border sticky-col bg-gray-50 text-right pr-2">N (夜) 人數</td>
+                                    <td v-for="(c, idx) in dailyStats" :key="idx" class="border count-n">{{ c.N }}</td>
+                                </tr>
+                                <tr class="stat-row border-b-2 border-gray-300">
+                                    <td class="border sticky-col bg-gray-50 text-right pr-2 font-normal text-gray-400">O (休) 人數</td>
+                                    <td v-for="(c, idx) in dailyStats" :key="idx" class="border count-o">{{ c.O }}</td>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(eng, eIdx) in engineers" :key="eIdx" class="hover:bg-blue-50/30 transition">
+                                    <td class="p-2 border font-medium sticky-col text-xs bg-white shadow-[1px_0_0_0_#e5e7eb]">{{ eng.name }}({{eng.group}})</td>
+                                    <td v-for="d in 30" :key="d" class="p-0.5 border text-center" :class="{'bg-yellow-50/30': isWeekend(d)}">
+                                        <input 
+                                            v-model="eng.schedule[d-1]" 
+                                            maxlength="1"
+                                            class="cell-input text-xs"
+                                            @input="validateInput($event, eIdx, d-1)"
+                                            @paste="handleTablePaste($event, eIdx, d-1)"
+                                        >
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed } = Vue;
+
+        createApp({
+            setup() {
+                const engineers = ref([]);
+                const initData = () => {
+                    engineers.value = [];
+                    for (let i = 1; i <= 15; i++) {
+                        let group = i <= 7 ? 'D' : (i <= 12 ? 'E' : 'N');
+                        engineers.value.push({ name: `engineer_${i}`, group, schedule: Array(30).fill('O') });
+                    }
+                };
+                initData();
+
+                const isWeekend = (day) => { const mod = day % 7; return mod === 1 || mod === 2; };
+
+                // 每日人數統計
+                const dailyStats = computed(() => {
+                    const stats = Array.from({ length: 30 }, () => ({ D: 0, E: 0, N: 0, O: 0 }));
+                    engineers.value.forEach(eng => {
+                        eng.schedule.forEach((shift, dayIdx) => {
+                            if (stats[dayIdx][shift] !== undefined) {
+                                stats[dayIdx][shift]++;
+                            }
+                        });
+                    });
+                    return stats;
+                });
+
+                const processPasteData = (text, startRow, startCol) => {
+                    const rows = text.trim().split(/\r\n|\n|\r/).map(row => row.split('\t'));
+                    rows.forEach((rowData, rOffset) => {
+                        const targetRow = startRow + rOffset;
+                        if (targetRow < engineers.value.length) {
+                            rowData.forEach((val, cOffset) => {
+                                const targetCol = startCol + cOffset;
+                                if (targetCol < 30) {
+                                    let cleanVal = val.trim().toUpperCase();
+                                    if (['D', 'E', 'N', 'O'].includes(cleanVal)) {
+                                        engineers.value[targetRow].schedule[targetCol] = cleanVal;
+                                    }
+                                }
+                            });
+                        }
+                    });
+                };
+
+                const handleGlobalPaste = (e) => {
+                    // 如果不是在 input 裡面貼上，就從 0,0 開始
+                    if (e.target.tagName !== 'INPUT') {
+                        const text = (e.clipboardData || window.clipboardData).getData('text');
+                        processPasteData(text, 0, 0);
+                    }
+                };
+
+                const handleTablePaste = (e, r, c) => {
+                    e.stopPropagation(); // 防止觸發全域貼上
+                    e.preventDefault();
+                    const text = (e.clipboardData || window.clipboardData).getData('text');
+                    processPasteData(text, r, c);
+                };
+
+                const validateInput = (e, eIdx, dIdx) => {
+                    let val = e.target.value.toUpperCase();
+                    if (!['D', 'E', 'N', 'O'].includes(val)) val = 'O';
+                    engineers.value[eIdx].schedule[dIdx] = val;
+                };
+
+                const results = computed(() => {
+                    let stats = { work_6_days: 0, night_to_de: 0, afternoon_to_d: 0, de_to_night: 0, wrong_default: 0, cont_off_low: 0, off_days_low: 0, weekend_low: 0, single_off: 0 };
+                    const rules = {
+                        work_6_days: { label: "連續上班6天 (1.0)", weight: 1.0 },
+                        night_to_de: { label: "夜班接早/午班 (1.0)", weight: 1.0 },
+                        afternoon_to_d: { label: "午班接早班 (1.0)", weight: 1.0 },
+                        de_to_night: { label: "早/午班接夜班 (1.0)", weight: 1.0 },
+                        wrong_default: { label: "違反預設班別 (0.2)", weight: 0.2 },
+                        cont_off_low: { label: "每月連休 < 2次 (0.1)", weight: 0.1 },
+                        off_days_low: { label: "每月休假 < 9天 (0.1)", weight: 0.1 },
+                        weekend_low: { label: "周末休假 < 4天 (0.1)", weight: 0.1 },
+                        single_off: { label: "僅排休1日 (0.1)", weight: 0.1 }
+                    };
+
+                    engineers.value.forEach(eng => {
+                        const sch = eng.schedule;
+                        let consecutive = 0;
+                        sch.forEach(s => {
+                            if (['D', 'E', 'N'].includes(s)) { consecutive++; if (consecutive >= 6) stats.work_6_days += (consecutive - 5); } 
+                            else { consecutive = 0; }
+                        });
+                        for (let i = 0; i < sch.length; i++) {
+                            const curr = sch[i], nxt = sch[i+1];
+                            if (i < sch.length - 1) {
+                                if (curr === 'N' && ['D', 'E'].includes(nxt)) stats.night_to_de++;
+                                if (curr === 'E' && nxt === 'D') stats.afternoon_to_d++;
+                                if (['D', 'E'].includes(curr) && nxt === 'N') stats.de_to_night++;
+                            }
+                            if (curr !== 'O' && curr !== eng.group) stats.wrong_default++;
+                        }
+                        let contOff = 0, j = 0;
+                        while (j < sch.length - 1) {
+                            if (sch[j] === 'O' && sch[j+1] === 'O') { contOff++; while (j < sch.length && sch[j] === 'O') j++; } else j++;
+                        }
+                        if (contOff < 2) stats.cont_off_low++;
+                        const offCount = sch.filter(s => s === 'O').length;
+                        if (offCount < 9) stats.off_days_low += (9 - offCount);
+                        let weOff = 0;
+                        sch.forEach((s, idx) => { if (isWeekend(idx + 1) && s === 'O') weOff++; });
+                        if (weOff < 4) stats.weekend_low += (4 - weOff);
+                        for (let i = 1; i < sch.length - 1; i++) { if (sch[i-1] !== 'O' && sch[i] === 'O' && sch[i+1] !== 'O') stats.single_off++; }
+                    });
+
+                    let total = 0;
+                    const report = Object.keys(rules).map(k => {
+                        const sub = stats[k] * rules[k].weight;
+                        total += sub;
+                        return { label: rules[k].label, count: stats[k], subtotal: sub };
+                    });
+                    return { report, total };
+                });
+
+                return { engineers, isWeekend, dailyStats, handleGlobalPaste, handleTablePaste, validateInput, totalScore: computed(()=>results.value.total), reportData: computed(()=>results.value.report), resetSchedule: initData };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
