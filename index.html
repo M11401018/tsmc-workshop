@@ -188,9 +188,19 @@
                         const sch = eng.schedule;
                         let consecutive = 0;
                         sch.forEach(s => {
-                            if (['D', 'E', 'N'].includes(s)) { consecutive++; if (consecutive >= 6) stats.work_6_days += (consecutive - 5); } 
-                            else { consecutive = 0; }
+                            if (['D', 'E', 'N'].includes(s)) {
+                                consecutive++;
+                            } else {
+                                if (consecutive >= 6) {
+                                    stats.work_6_days += (consecutive - 5);
+                                }
+                                consecutive = 0;
+                            }
                         });
+                        if (consecutive >= 6) {
+                            stats.work_6_days += (consecutive - 5);
+                        }
+
                         for (let i = 0; i < sch.length; i++) {
                             const curr = sch[i], nxt = sch[i+1];
                             if (i < sch.length - 1) {
